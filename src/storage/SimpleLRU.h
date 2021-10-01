@@ -16,6 +16,17 @@ namespace Backend {
  * That is NOT thread safe implementaiton!!
  */
 class SimpleLRU : public Afina::Storage {
+private:
+    // LRU cache node
+    using lru_node = struct lru_node {
+        const std::string key;
+        std::string value;
+        lru_node* prev;
+        std::unique_ptr<lru_node> next;
+    };
+
+    using lru_map =
+        std::map<std::reference_wrapper<const std::string>, std::reference_wrapper<lru_node>, std::less<std::string>>;
 public:
     SimpleLRU(size_t max_size = 1024) : _max_size(max_size), _current_size(0) {}
 
@@ -23,15 +34,13 @@ public:
         _lru_index.clear();
 
         // To avoid stack overflow, we do reset() in a loop,
-        // starting from the last element, which next unique_ptr is nullptr.
-        auto del = _lru_head ? _lru_head->prev : nullptr;
-        while(del != _lru_head.get())
+        // starting from the head element.
+        while(_lru_head)
         {
-            auto prev = del->prev;
-            prev->next.reset();
-            del = prev;
+            std::unique_ptr<lru_node> tmp;
+            std::swap(_lru_head->next, tmp);
+            std::swap(_lru_head, tmp);
         }
-        _lru_head.reset();
     }
 
     // Implements Afina::Storage interface
@@ -50,17 +59,17 @@ public:
     bool Get(const std::string &key, std::string &value) override;
 
 private:
-    // LRU cache node
-    using lru_node = struct lru_node {
-        const std::string key;
-        std::string value;
-        lru_node* prev;
-        std::unique_ptr<lru_node> next;
-    };
+    bool FreeSpace(std::size_t delta);
 
-    using lru_map =
-        std::map<std::reference_wrapper<const std::string>, std::reference_wrapper<lru_node>, std::less<std::string>>;
+    void MoveNodeToTail(lru_node& node);
+    
+    void InsertNode(const std::string &key, const std::string &value);
 
+    void UpdateNode(lru_node& node, const std::string &new_value);
+    
+    bool ProcessPut(const std::string &key, const std::string &value, lru_node* found_node);
+
+private:
     // Maximum number of bytes could be stored in this cache.
     // i.e all (keys+values) must be not greater than the _max_size
     std::size_t _max_size;
@@ -76,9 +85,6 @@ private:
 
     // Index of nodes from list above, allows fast random access to elements by lru_node#key
     lru_map _lru_index;
-
-private:
-    bool _put(const std::string &key, const std::string &value, lru_map::iterator it);
 };
 
 } // namespace Backend

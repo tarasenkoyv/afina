@@ -6,7 +6,11 @@ namespace Backend {
 // See MapBasedGlobalLockImpl.h
 bool SimpleLRU::Put(const std::string &key, const std::string &value) { 
     auto it = _lru_index.find(key);
-    return _put(key, value, it);
+    lru_node* found_node = nullptr;
+    if (it != _lru_index.end()) {
+        found_node = &(it->second.get());
+    }
+    return ProcessPut(key, value, found_node);
  }
 
 // See MapBasedGlobalLockImpl.h
@@ -15,16 +19,20 @@ bool SimpleLRU::PutIfAbsent(const std::string &key, const std::string &value) {
     if (it != _lru_index.end()) {
         return false;
     }
-    return _put(key, value, it);
+    return ProcessPut(key, value, nullptr);
 }
 
 // See MapBasedGlobalLockImpl.h
 bool SimpleLRU::Set(const std::string &key, const std::string &value) { 
     auto it = _lru_index.find(key);
+    lru_node* found_node = nullptr;
     if (it == _lru_index.end()) {
         return false;
     }
-    return _put(key, value, it);
+    else {
+        found_node = &(it->second.get());
+    }
+    return ProcessPut(key, value, found_node);
  }
 
 // See MapBasedGlobalLockImpl.h
@@ -60,26 +68,23 @@ bool SimpleLRU::Get(const std::string &key, std::string &value) {
     if (it == _lru_index.end()) {
         return false;
     }
-    value = it->second.get().value;
+    auto found_node = &(it->second.get());
+    MoveNodeToTail(*found_node);
+    value = (*found_node).value;
     return true;
  }
 
-bool SimpleLRU::_put(const std::string &key, const std::string &value, lru_map::iterator it) {
-    std::size_t put_size = key.size() + value.size();
+bool SimpleLRU::FreeSpace(std::size_t put_size) {
+    if (put_size == 0) {
+        return true;
+    }
+
     if (put_size > _max_size) {
         return false;
     }
-    std::size_t replaced_size = 0;
 
-    // If we find key and replace the value in this key, then the total size is calculated minus the replaced lru_node.
-    if (it != _lru_index.end()) {
-        replaced_size = it->second.get().key.size() + it->second.get().value.size();
-    }
     // Remove the oldest elements until there is enough space.
-    while (_current_size - replaced_size + put_size > _max_size) {
-        if (_lru_head->key == key) {
-            replaced_size = 0;
-        }
+    while(_current_size + put_size > _max_size) {
         _current_size -= _lru_head->key.size() + _lru_head->value.size();
         lru_node* new_head = _lru_head->next.get();
         new_head->prev = _lru_head->prev;
@@ -87,26 +92,82 @@ bool SimpleLRU::_put(const std::string &key, const std::string &value, lru_map::
         _lru_index.erase(_lru_head->key);
         _lru_head.reset(new_head);
     }
-    // Add key
+
+    return true;
+}
+
+void SimpleLRU::MoveNodeToTail(lru_node& node) {
+    if (_lru_head->prev == &node) {
+        return;
+    }
+
+    auto left_node = node.prev;
+    auto right_node = node.next.get();
+
+    right_node->prev = node.prev;
+    left_node->next.release();
+    std::swap(left_node->next, node.next);
+    
+    auto lru_tail = _lru_head->prev;
+    lru_tail->next.release();
+    lru_tail->next.reset(&node);
+    node.prev = lru_tail;
+    
+    if (_lru_head.get() == &node) {
+        _lru_head.release();
+        _lru_head.reset(right_node);
+    }
+    _lru_head->prev = &node;
+}
+
+void SimpleLRU::InsertNode(const std::string &key, const std::string &value) {
     if (_lru_head) {
-        if (it != _lru_index.end()) {
-            auto& old_value = it->second.get().value;
-            _current_size -= key.size() + old_value.size();
-            old_value = value;
-        }
-        else {
-            auto freshest = _lru_head->prev;
-            freshest->next.reset(new lru_node{key, value, nullptr, nullptr});
-            freshest->next->prev = freshest;
-            _lru_head->prev = freshest->next.get();
-            _lru_index.emplace(_lru_head->prev->key, *_lru_head->prev);
-        }
-    } else {
+        auto freshest = _lru_head->prev;
+        auto new_node = new lru_node{ key, value, nullptr, nullptr };
+        freshest->next.reset(new_node);
+        new_node->prev = freshest;
+        _lru_head->prev = new_node;
+    }
+    else {
         _lru_head.reset(new lru_node{key, value, nullptr, nullptr});
         _lru_head->prev = _lru_head.get();
-        _lru_index.emplace(_lru_head->prev->key, *_lru_head->prev);
     }
+    // Add to index
+    _lru_index.emplace(_lru_head->prev->key, *_lru_head->prev);
+    // Update the current size of cache
     _current_size += key.size() + value.size();
+}
+
+void SimpleLRU::UpdateNode(lru_node& node, const std::string &new_value) {
+    auto& old_value = node.value;
+    _current_size += node.value.size() - old_value.size();
+    old_value = new_value;
+}
+
+bool SimpleLRU::ProcessPut(const std::string &key, const std::string &value, lru_node* found_node) {
+    std::size_t put_size = key.size() + value.size();
+    std::size_t found_node_size = 0;
+
+    // If we find node with this key, 
+    // we move the found node to the tail,
+    // then we free space which is equal delta = put_size - found_node_size
+    // to have space in cache and replace the value in this found node.
+    if (found_node != nullptr) {
+        MoveNodeToTail(*found_node);
+        found_node_size = key.size() + found_node->value.size();
+    }
+    std::size_t delta = put_size - found_node_size;
+    if (!FreeSpace(delta)) {
+        return false;
+    }
+    
+    // Add key
+    if (found_node != nullptr) {
+        UpdateNode(*found_node, value);
+    }
+    else {
+        InsertNode(key, value);
+    }
     return true;
 }
 
