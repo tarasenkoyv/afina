@@ -101,22 +101,26 @@ void SimpleLRU::MoveNodeToTail(lru_node& node) {
         return;
     }
 
-    auto left_node = node.prev;
-    auto right_node = node.next.get();
-
-    right_node->prev = node.prev;
-    left_node->next.release();
-    std::swap(left_node->next, node.next);
-    
     auto lru_tail = _lru_head->prev;
-    lru_tail->next.release();
+    // Left node exists, 
+    // and we can link left and right nodes
+    // to exclude middle node.
+    if (_lru_head.get() != &node) {
+        auto right_node = node.next.get();
+        auto left_node = node.prev;
+        right_node->prev = left_node;
+        left_node->next.release();
+        std::swap(left_node->next, node.next);
+    }
+    // Node is head, move _lru_head to the right node
+    else {
+        _lru_head.release();
+        std::swap(_lru_head, node.next);
+    }
+
     lru_tail->next.reset(&node);
     node.prev = lru_tail;
     
-    if (_lru_head.get() == &node) {
-        _lru_head.release();
-        _lru_head.reset(right_node);
-    }
     _lru_head->prev = &node;
 }
 
