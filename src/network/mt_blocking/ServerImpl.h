@@ -2,6 +2,9 @@
 #define AFINA_NETWORK_MT_BLOCKING_SERVER_H
 
 #include <atomic>
+#include <condition_variable>
+#include <mutex>
+#include <set>
 #include <thread>
 
 #include <afina/network/Server.h>
@@ -39,6 +42,12 @@ protected:
     void OnRun();
 
 private:
+    /**
+     *  Method for handling client request on new thread  
+     */
+    void OnHandleClientRequest(int client_socket);
+
+private:
     // Logger instance
     std::shared_ptr<spdlog::logger> _logger;
 
@@ -52,6 +61,19 @@ private:
 
     // Thread to run network on
     std::thread _thread;
+
+    // Maximum number of threads could be run in this server
+    uint32_t _max_handlers;
+    
+    // Set of open client sockets
+    std::set<int> _client_sockets;
+
+    // Mutex for managing _client_sockets
+    std::mutex _mtx;
+
+    // Indicates that all client requests have been processed and 
+    // the server can stop
+    std::condition_variable _can_stop_server;
 };
 
 } // namespace MTblocking
