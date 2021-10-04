@@ -16,12 +16,31 @@ namespace Backend {
  * That is NOT thread safe implementaiton!!
  */
 class SimpleLRU : public Afina::Storage {
+private:
+    // LRU cache node
+    using lru_node = struct lru_node {
+        const std::string key;
+        std::string value;
+        lru_node* prev;
+        std::unique_ptr<lru_node> next;
+    };
+
+    using lru_map =
+        std::map<std::reference_wrapper<const std::string>, std::reference_wrapper<lru_node>, std::less<std::string>>;
 public:
-    SimpleLRU(size_t max_size = 1024) : _max_size(max_size) {}
+    SimpleLRU(size_t max_size = 1024) : _max_size(max_size), _current_size(0) {}
 
     ~SimpleLRU() {
         _lru_index.clear();
-        _lru_head.reset(); // TODO: Here is stack overflow
+
+        // To avoid stack overflow, we do reset() in a loop,
+        // starting from the head element.
+        while(_lru_head)
+        {
+            std::unique_ptr<lru_node> tmp;
+            std::swap(_lru_head->next, tmp);
+            std::swap(_lru_head, tmp);
+        }
     }
 
     // Implements Afina::Storage interface
@@ -40,17 +59,23 @@ public:
     bool Get(const std::string &key, std::string &value) override;
 
 private:
-    // LRU cache node
-    using lru_node = struct lru_node {
-        std::string key;
-        std::string value;
-        std::unique_ptr<lru_node> prev;
-        std::unique_ptr<lru_node> next;
-    };
+    bool FreeSpace(std::size_t delta);
 
+    void MoveNodeToTail(lru_node& node);
+    
+    void InsertNode(const std::string &key, const std::string &value);
+
+    void UpdateNode(lru_node& node, const std::string &new_value);
+    
+    bool ProcessPut(const std::string &key, const std::string &value, lru_node* found_node);
+
+private:
     // Maximum number of bytes could be stored in this cache.
     // i.e all (keys+values) must be not greater than the _max_size
     std::size_t _max_size;
+
+    // Current number of bytes in this cache.
+    std::size_t _current_size;
 
     // Main storage of lru_nodes, elements in this list ordered descending by "freshness": in the head
     // element that wasn't used for longest time.
@@ -59,7 +84,7 @@ private:
     std::unique_ptr<lru_node> _lru_head;
 
     // Index of nodes from list above, allows fast random access to elements by lru_node#key
-    std::map<std::reference_wrapper<std::string>, std::reference_wrapper<lru_node>, std::less<std::string>> _lru_index;
+    lru_map _lru_index;
 };
 
 } // namespace Backend
