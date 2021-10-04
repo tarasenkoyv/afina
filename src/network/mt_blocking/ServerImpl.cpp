@@ -262,12 +262,14 @@ void ServerImpl::OnHandleClientRequest(int client_socket) {
     // We are done with this connection
     close(client_socket);
 
+    bool was_empty = false;
     {
         std::lock_guard<std::mutex> lk(_mtx);
         _client_sockets.erase(client_socket);
-        if (_client_sockets.empty()) {
-            _can_stop_server.notify_one();
-        }
+        was_empty = _client_sockets.empty();
+    }
+    if (was_empty) {
+        _can_stop_server.notify_one();
     }
 }
 
