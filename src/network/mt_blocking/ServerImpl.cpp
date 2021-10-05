@@ -153,7 +153,7 @@ void ServerImpl::OnRun() {
         {
             std::lock_guard<std::mutex> lk(_mtx);
 
-            if (_client_sockets.size() < _max_handlers) {
+            if (_client_sockets.size() <= _max_handlers) {
                 _client_sockets.insert(client_socket);
                 std::thread(&ServerImpl::OnHandleClientRequest, this, client_socket).detach();
             } 
