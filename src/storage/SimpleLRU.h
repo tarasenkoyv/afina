@@ -59,15 +59,13 @@ public:
     bool Get(const std::string &key, std::string &value) override;
 
 private:
-    bool FreeSpace(std::size_t delta);
+    void FreeSpace(std::size_t put_size);
 
     void MoveNodeToTail(lru_node& node);
     
     void InsertNode(const std::string &key, const std::string &value);
 
     void UpdateNode(lru_node& node, const std::string &new_value);
-    
-    bool ProcessPut(const std::string &key, const std::string &value, lru_node* found_node);
 
 private:
     // Maximum number of bytes could be stored in this cache.
