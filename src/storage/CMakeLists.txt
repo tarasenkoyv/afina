@@ -1,6 +1,7 @@
 # build service
 set(SOURCE_FILES
     SimpleLRU.cpp
+    StripedLockLRU.h
 )
 
 add_library(Storage ${SOURCE_FILES})
