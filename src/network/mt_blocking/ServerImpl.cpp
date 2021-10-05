@@ -74,6 +74,12 @@ void ServerImpl::Start(uint16_t port, uint32_t n_accept, uint32_t n_workers) {
         throw std::runtime_error("Socket listen() failed");
     }
 
+    // Add _server_socket to same set where clients are
+    {
+        std::lock_guard<std::mutex> lk(_mtx);
+        _client_sockets.insert(_server_socket);
+    }
+
     running.store(true);
     _thread = std::thread(&ServerImpl::OnRun, this);
 }
@@ -81,7 +87,6 @@ void ServerImpl::Start(uint16_t port, uint32_t n_accept, uint32_t n_workers) {
 // See Server.h
 void ServerImpl::Stop() {
     running.store(false);
-    shutdown(_server_socket, SHUT_RDWR);
 
     std::lock_guard<std::mutex> lk(_mtx);
     for (auto client_socket : _client_sockets) {
@@ -91,13 +96,12 @@ void ServerImpl::Stop() {
 
 // See Server.h
 void ServerImpl::Join() {
-    assert(_thread.joinable());
     _thread.join();
-    close(_server_socket);
 
-    // We block main thread until all clients finish their execution
+    // If server is stopped, 
+    // we block main thread until all clients finish their execution
     std::unique_lock<std::mutex> lk(_mtx);
-    while (!_client_sockets.empty()) {
+    while (!running.load() && !_client_sockets.empty()) {
         _can_stop_server.wait(lk);
     }
 }
@@ -159,6 +163,14 @@ void ServerImpl::OnRun() {
         }
     }
 
+    // We've finished to accept new connections
+    {
+        std::lock_guard<std::mutex> lk(_mtx);
+        _client_sockets.erase(_server_socket);
+        close(_server_socket);
+    }
+
+    
     // Cleanup on exit...
     _logger->warn("Network stopped");
 }
@@ -259,16 +271,16 @@ void ServerImpl::OnHandleClientRequest(int client_socket) {
         _logger->error("Failed to process connection on descriptor {}: {}", client_socket, ex.what());
     }
 
-    // We are done with this connection
-    close(client_socket);
-
-    bool was_empty = false;
+    bool became_empty = false;
     {
         std::lock_guard<std::mutex> lk(_mtx);
         _client_sockets.erase(client_socket);
-        was_empty = _client_sockets.empty();
+        // We are done with this connection
+        close(client_socket);
+
+        became_empty = _client_sockets.empty();
     }
-    if (was_empty) {
+    if (became_empty && !running.load()) {
         _can_stop_server.notify_one();
     }
 }
