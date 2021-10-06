@@ -75,13 +75,10 @@ void ServerImpl::Start(uint16_t port, uint32_t n_accept, uint32_t n_workers) {
     }
 
     // Add _server_socket to same set where clients are
-    {
-        std::lock_guard<std::mutex> lk(_mtx);
-        _client_sockets.insert(_server_socket);
-    }
-
+    _sockets.insert(_server_socket);
+    
     running.store(true);
-    _thread = std::thread(&ServerImpl::OnRun, this);
+    std::thread(&ServerImpl::OnRun, this).detach();
 }
 
 // See Server.h
@@ -89,19 +86,18 @@ void ServerImpl::Stop() {
     running.store(false);
 
     std::lock_guard<std::mutex> lk(_mtx);
-    for (auto client_socket : _client_sockets) {
+    for (auto client_socket : _sockets) {
         shutdown(client_socket, SHUT_RD);
     }
 }
 
 // See Server.h
 void ServerImpl::Join() {
-    _thread.join();
 
     // If server is stopped, 
     // we block main thread until all clients finish their execution
     std::unique_lock<std::mutex> lk(_mtx);
-    while (!running.load() && !_client_sockets.empty()) {
+    while (!running.load() && !_sockets.empty()) {
         _can_stop_server.wait(lk);
     }
 }
@@ -153,8 +149,8 @@ void ServerImpl::OnRun() {
         {
             std::lock_guard<std::mutex> lk(_mtx);
 
-            if (_client_sockets.size() <= _max_handlers) {
-                _client_sockets.insert(client_socket);
+            if (_sockets.size() <= _max_handlers) {
+                _sockets.insert(client_socket);
                 std::thread(&ServerImpl::OnHandleClientRequest, this, client_socket).detach();
             } 
             else {
@@ -163,16 +159,11 @@ void ServerImpl::OnRun() {
         }
     }
 
-    // We've finished to accept new connections
-    {
-        std::lock_guard<std::mutex> lk(_mtx);
-        _client_sockets.erase(_server_socket);
-        close(_server_socket);
-    }
-
-    
     // Cleanup on exit...
     _logger->warn("Network stopped");
+
+    // We've finished to accept new connections
+    CloseSocket(_server_socket);
 }
 
 // See Server.h
@@ -271,17 +262,22 @@ void ServerImpl::OnHandleClientRequest(int client_socket) {
         _logger->error("Failed to process connection on descriptor {}: {}", client_socket, ex.what());
     }
 
+    CloseSocket(client_socket);
+}
+
+// See Server.h
+void ServerImpl::CloseSocket(int client_socket) {
     bool became_empty = false;
     {
         std::lock_guard<std::mutex> lk(_mtx);
-        _client_sockets.erase(client_socket);
+        _sockets.erase(client_socket);
         // We are done with this connection
         close(client_socket);
 
-        became_empty = _client_sockets.empty();
+        became_empty = _sockets.empty();
     }
     if (became_empty && !running.load()) {
-        _can_stop_server.notify_one();
+        _can_stop_server.notify_all();
     }
 }
 

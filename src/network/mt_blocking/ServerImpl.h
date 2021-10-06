@@ -46,6 +46,8 @@ private:
      *  Method for handling client request on new thread  
      */
     void OnHandleClientRequest(int client_socket);
+    
+    void CloseSocket(int client_socket);
 
 private:
     // Logger instance
@@ -59,14 +61,11 @@ private:
     // Server socket to accept connections on
     int _server_socket;
 
-    // Thread to run network on
-    std::thread _thread;
-
     // Maximum number of threads could be run in this server
     uint32_t _max_handlers;
     
     // Set of open client sockets
-    std::set<int> _client_sockets;
+    std::set<int> _sockets;
 
     // Mutex for managing _client_sockets
     std::mutex _mtx;
