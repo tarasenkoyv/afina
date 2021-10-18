@@ -15,12 +15,14 @@ namespace Backend {
 
 class StripedLockLRU : public Afina::Storage {
 public:
-    StripedLockLRU(size_t max_size = 1024, size_t n_stripes = 4) : _n_stripes(n_stripes) {
+    StripedLockLRU(size_t memory_limit = 1024, size_t n_stripes = 4) : _n_stripes(n_stripes) {
         assert(_n_stripes > 0);
-        assert(max_size > 0);
+        assert(memory_limit > 0);
 
-        size_t stripe_max_size = max_size / n_stripes;
-        assert(stripe_max_size > 0);
+        size_t stripe_max_size = memory_limit / n_stripes;
+        if (stripe_max_size < 1024 * 1024UL) {
+            throw std::runtime_error("parameters are set incorrectly");
+        }
 
         _stripes.resize(_n_stripes);
         for (std::size_t i = 0 ; i < _n_stripes; i++) {
