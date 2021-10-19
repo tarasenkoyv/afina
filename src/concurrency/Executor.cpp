@@ -14,35 +14,19 @@ Executor::Executor(std::size_t low_watermark, std::size_t high_watermark,
                    _high_watermark(high_watermark), 
                    _max_queue_size(max_queue_size), _idle_time(idle_time) {
     counter_exist_threads = 0;
-    state.store(Executor::State::kInit);
+    
+    Start();
 }
 
 void Executor::Start() {
     //_logger = pLogging->select("network");
     //_logger->info("Start thread pull");
-
-    if (state.load() != Executor::State::kInit) return;
-    state.store(Executor::State::kRun);
-    
     counter_exist_threads = _low_watermark;
     for (std::size_t i = 0; i < _low_watermark; ++i) {
         std::thread([this]() { this->perform(true); }).detach();
     }
 
-    std::thread(&Executor::OnRun, this).detach();
-} 
-
-void Executor::OnRun() {
-    while (state.load() == Executor::State::kRun) {
-        // Create new thread if it's necessary
-        {
-            std::unique_lock<std::mutex> lock(mutex_counter_exist_threads);
-            if (counter_exist_threads < _high_watermark) {
-                ++counter_exist_threads;
-                std::thread([this](){ this->perform(false); }).detach();
-            }
-        }
-    }
+    state.store(Executor::State::kRun);
 }
 
 Executor::~Executor(){
@@ -78,7 +62,7 @@ void Executor::perform(bool is_not_dying_thread) {
 
             bool timeout = false;
             size_t remaining_time = _idle_time;
-            while (tasks.empty()) {
+            while (state.load() == Executor::State::kRun && tasks.empty()) {
                 auto begin = std::chrono::steady_clock::now();
                 auto wait_res = empty_condition.wait_until(lock, begin + std::chrono::milliseconds(remaining_time));
                 if (wait_res == std::cv_status::timeout) {
@@ -90,17 +74,28 @@ void Executor::perform(bool is_not_dying_thread) {
                 }
             }
 
+            // Queue may be empty if empty_condition notify was called from Stop()
+            // (and after that executor state is equal Stopping)
+            // or if timeout is true
+            // or timeout + Stopping
             if (tasks.empty()) {
-                if (is_not_dying_thread) continue;
-                // Exit to die
+                if (timeout && is_not_dying_thread) {
+                    continue;
+                }
+                // Exit from while to die
                 break;
             }
             else {
-                task = std::move(tasks.front());
-                tasks.pop();
+                if (!timeout || is_not_dying_thread) {
+                    task = std::move(tasks.front());
+                    tasks.pop();
+                }
+                // Exit from while to die
+                break;
             }
         }
         
+        counter_busy_threads.fetch_add(1);
         // Execute the received task
         try {
             task();
@@ -108,6 +103,7 @@ void Executor::perform(bool is_not_dying_thread) {
         catch(const std::exception& ex) {
             //_logger->error("Failed to execute task: {}", ex.what());
         }
+        counter_busy_threads.fetch_sub(1);
     }
 
     bool pull_became_empty = false;
@@ -115,7 +111,7 @@ void Executor::perform(bool is_not_dying_thread) {
         std::unique_lock<std::mutex> lock(mutex_counter_exist_threads);
         --counter_exist_threads;
 
-        pull_became_empty = counter_exist_threads == 0;
+        pull_became_empty = (counter_exist_threads == 0);
     }
     if (pull_became_empty && state.load() == Executor::State::kStopping) {
         state.store(Executor::State::kStopped);

@@ -40,11 +40,6 @@ public:
     ~Executor();
 
     /**
-     * Starts executor.
-     */
-    void Start();
-
-    /**
      * Signal thread pool to stop, it will stop accepting new jobs and close threads just after each become
      * free. All enqueued jobs will be complete.
      *
@@ -61,15 +56,27 @@ public:
      */
     template <typename F, typename... Types> bool Execute(F &&func, Types... args) {
         
-        std::unique_lock<std::mutex> lock(this->mutex_tasks);
-        if (state.load() != State::kRun || tasks.size() > _max_queue_size) return false;
+        {
+            std::unique_lock<std::mutex> lock(this->mutex_tasks);
+            if (state.load() != State::kRun || tasks.size() > _max_queue_size) return false;
 
-        // Prepare "task"
-        auto exec = std::bind(std::forward<F>(func), std::forward<Types>(args)...);
+            // Prepare "task"
+            auto exec = std::bind(std::forward<F>(func), std::forward<Types>(args)...);
 
-        // Enqueue new task
-        tasks.push(exec);
+            // Enqueue new task
+            tasks.push(exec);
+        }
         empty_condition.notify_one();
+
+        // Create new thread if it's necessary
+        {
+            std::unique_lock<std::mutex> lock(mutex_counter_exist_threads);
+            if (counter_busy_threads.load() == counter_exist_threads && 
+                counter_exist_threads < _high_watermark) {
+                ++counter_exist_threads;
+                std::thread([this](){ this->perform(false); }).detach();
+            }
+        }
         return true;
     }
 
@@ -80,13 +87,12 @@ private:
     Executor &operator=(const Executor &); // = delete;
     Executor &operator=(Executor &&);      // = delete;
 
-    //std::shared_ptr<spdlog::logger> _logger;
-
     /**
-     * Method is running in the separate thread
-     * and create new threads if it's necessary.
+     * Starts executor.
      */
-    void OnRun();
+    void Start();
+
+    //std::shared_ptr<spdlog::logger> _logger;
 
     /**
      * Main function that all pool threads are running. It polls internal task queue and execute tasks
@@ -99,17 +105,24 @@ private:
     std::mutex mutex_tasks;
 
     /**
-     * Mutex to protect counters of existing threads 
+     * Mutex to protect counter of existing threads 
      * from concurrent modification
      */
     std::mutex mutex_counter_exist_threads;
+    
+    // Counter of existing threads
+    size_t counter_exist_threads;
 
+    // Conditional variable to await completion all threads after stopping executor
+    std::condition_variable can_stop_executor_condition;
+    
+    // Counter of busy threads
+    std::atomic<std::size_t> counter_busy_threads;
+    
     /**
      * Conditional variable to await new data in case of empty queue
      */
     std::condition_variable empty_condition;
-
-    std::condition_variable can_stop_executor_condition;
 
     /**
      * Task queue
@@ -125,8 +138,6 @@ private:
     const std::size_t _high_watermark;
     const std::size_t _max_queue_size;
     const std::size_t _idle_time;
-
-    size_t counter_exist_threads;
 };
 
 } // namespace Concurrency
