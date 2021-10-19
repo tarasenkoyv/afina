@@ -1,6 +1,7 @@
 #ifndef AFINA_CONCURRENCY_EXECUTOR_H
 #define AFINA_CONCURRENCY_EXECUTOR_H
 
+#include <atomic>
 #include <condition_variable>
 #include <functional>
 #include <memory>
@@ -8,6 +9,10 @@
 #include <queue>
 #include <string>
 #include <thread>
+
+//namespace spdlog {
+//class logger;
+//}
 
 namespace Afina {
 namespace Concurrency {
@@ -17,10 +22,10 @@ namespace Concurrency {
  */
 class Executor {
     enum class State {
+        kInit,
         // Threadpool is fully operational, tasks could be added and get executed
         kRun,
-
-        // Threadpool is on the way to be shutdown, no ned task could be added, but existing will be
+        // Threadpool is on the way to be shutdown, no new task could be added, but existing will be
         // completed as requested
         kStopping,
 
@@ -28,8 +33,16 @@ class Executor {
         kStopped
     };
 
-    Executor(std::string name, int size);
+public:
+    Executor(std::size_t low_watermark, std::size_t high_watermark, 
+             std::size_t max_queue_size, std::size_t idle_time);
+
     ~Executor();
+
+    /**
+     * Starts executor.
+     */
+    void Start();
 
     /**
      * Signal thread pool to stop, it will stop accepting new jobs and close threads just after each become
@@ -47,16 +60,15 @@ class Executor {
      * execution finished by itself
      */
     template <typename F, typename... Types> bool Execute(F &&func, Types... args) {
+        
+        std::unique_lock<std::mutex> lock(this->mutex_tasks);
+        if (state.load() != State::kRun || tasks.size() > _max_queue_size) return false;
+
         // Prepare "task"
         auto exec = std::bind(std::forward<F>(func), std::forward<Types>(args)...);
 
-        std::unique_lock<std::mutex> lock(this->mutex);
-        if (state != State::kRun) {
-            return false;
-        }
-
         // Enqueue new task
-        tasks.push_back(exec);
+        tasks.push(exec);
         empty_condition.notify_one();
         return true;
     }
@@ -68,35 +80,53 @@ private:
     Executor &operator=(const Executor &); // = delete;
     Executor &operator=(Executor &&);      // = delete;
 
+    //std::shared_ptr<spdlog::logger> _logger;
+
+    /**
+     * Method is running in the separate thread
+     * and create new threads if it's necessary.
+     */
+    void OnRun();
+
     /**
      * Main function that all pool threads are running. It polls internal task queue and execute tasks
      */
-    friend void perform(Executor *executor);
+    void perform(bool is_not_dying_thread);
 
     /**
-     * Mutex to protect state below from concurrent modification
+     * Mutex to protect task queue below from concurrent modification
      */
-    std::mutex mutex;
+    std::mutex mutex_tasks;
+
+    /**
+     * Mutex to protect counters of existing threads 
+     * from concurrent modification
+     */
+    std::mutex mutex_counter_exist_threads;
 
     /**
      * Conditional variable to await new data in case of empty queue
      */
     std::condition_variable empty_condition;
 
-    /**
-     * Vector of actual threads that perorm execution
-     */
-    std::vector<std::thread> threads;
+    std::condition_variable can_stop_executor_condition;
 
     /**
      * Task queue
      */
-    std::deque<std::function<void()>> tasks;
+    std::queue<std::function<void()>> tasks;
 
     /**
-     * Flag to stop bg threads
+     * Flag to stop threads
      */
-    State state;
+    std::atomic<State> state;
+
+    const std::size_t _low_watermark;
+    const std::size_t _high_watermark;
+    const std::size_t _max_queue_size;
+    const std::size_t _idle_time;
+
+    size_t counter_exist_threads;
 };
 
 } // namespace Concurrency
