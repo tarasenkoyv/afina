@@ -91,7 +91,9 @@ void Executor::perform(bool is_not_dying_thread) {
                     tasks.pop();
                 }
                 // Exit from while to die
-                break;
+                else {
+                    break;
+                }
             }
         }
         
