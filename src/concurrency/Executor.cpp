@@ -63,7 +63,6 @@ void Executor::Stop(bool await) {
 
 void Executor::perform(bool is_not_dying_thread) {
     std::unique_lock<std::mutex> lock(_mtx);
-    if (state == State::kInit) return;
     while (state == State::kRun) {
         std::function<void()> task;
 
