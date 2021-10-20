@@ -40,6 +40,11 @@ public:
     ~Executor();
 
     /**
+     * Starts executor.
+     */
+    void Start();
+
+    /**
      * Signal thread pool to stop, it will stop accepting new jobs and close threads just after each become
      * free. All enqueued jobs will be complete.
      *
@@ -55,28 +60,24 @@ public:
      * execution finished by itself
      */
     template <typename F, typename... Types> bool Execute(F &&func, Types... args) {
-        
         {
-            std::unique_lock<std::mutex> lock(this->mutex_tasks);
-            if (state.load() != State::kRun || tasks.size() > _max_queue_size) return false;
+            std::unique_lock<std::mutex> lock(_mtx);
+            if (state != State::kRun || tasks.size() > _max_queue_size) return false;
 
             // Prepare "task"
             auto exec = std::bind(std::forward<F>(func), std::forward<Types>(args)...);
 
             // Enqueue new task
             tasks.push(exec);
-        }
-        empty_condition.notify_one();
 
-        // Create new thread if it's necessary
-        {
-            std::unique_lock<std::mutex> lock(mutex_counter_exist_threads);
-            if (counter_busy_threads.load() == counter_exist_threads && 
+            // Create new thread if it's necessary
+            if (counter_busy_threads == counter_exist_threads && 
                 counter_exist_threads < _high_watermark) {
                 ++counter_exist_threads;
                 std::thread([this](){ this->perform(false); }).detach();
             }
         }
+        empty_condition.notify_one();
         return true;
     }
 
@@ -87,11 +88,6 @@ private:
     Executor &operator=(const Executor &); // = delete;
     Executor &operator=(Executor &&);      // = delete;
 
-    /**
-     * Starts executor.
-     */
-    void Start();
-
     //std::shared_ptr<spdlog::logger> _logger;
 
     /**
@@ -100,24 +96,19 @@ private:
     void perform(bool is_not_dying_thread);
 
     /**
-     * Mutex to protect task queue below from concurrent modification
+     * Mutex to protect task queue, counters from concurrent modification
      */
-    std::mutex mutex_tasks;
+    std::mutex _mtx;
 
-    /**
-     * Mutex to protect counter of existing threads 
-     * from concurrent modification
-     */
-    std::mutex mutex_counter_exist_threads;
     
     // Counter of existing threads
     size_t counter_exist_threads;
 
+    // Counter of busy threads
+    size_t counter_busy_threads;
+
     // Conditional variable to await completion all threads after stopping executor
     std::condition_variable can_stop_executor_condition;
-    
-    // Counter of busy threads
-    std::atomic<std::size_t> counter_busy_threads;
     
     /**
      * Conditional variable to await new data in case of empty queue
@@ -132,7 +123,7 @@ private:
     /**
      * Flag to stop threads
      */
-    std::atomic<State> state;
+    State state;
 
     const std::size_t _low_watermark;
     const std::size_t _high_watermark;

@@ -106,7 +106,8 @@ void ServerImpl::Join() {
 // See Server.h
 void ServerImpl::OnRun() {
     Afina::Concurrency::Executor thread_pool(3, _max_handlers, 10, 1000);
-
+    thread_pool.Start();
+    
     // Here is connection state
     // - parser: parse state of the stream
     // - command_to_execute: last command parsed out of stream
