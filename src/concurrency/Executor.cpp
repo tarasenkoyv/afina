@@ -47,7 +47,7 @@ void Executor::Stop(bool await) {
 
     if (await) {
         while (counter_exist_threads > 0) {
-            can_stop_executor_condition.wait(lock);
+            await_condition.wait(lock);
         }
     }
 }
@@ -107,7 +107,7 @@ void Executor::perform(bool is_not_dying_thread) {
     --counter_exist_threads;
     if (counter_exist_threads == 0 && state == State::kStopping) {
         state = State::kStopped;
-        can_stop_executor_condition.notify_all();
+        await_condition.notify_all();
     }
 }
 } // namespace Concurrency

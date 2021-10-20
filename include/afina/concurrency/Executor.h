@@ -108,7 +108,7 @@ private:
     size_t counter_busy_threads;
 
     // Conditional variable to await completion all threads after stopping executor
-    std::condition_variable can_stop_executor_condition;
+    std::condition_variable await_condition;
     
     /**
      * Conditional variable to await new data in case of empty queue
