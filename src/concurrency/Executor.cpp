@@ -35,29 +35,20 @@ Executor::~Executor(){
 }
 
 void Executor::Stop(bool await) {
-    bool have_waiting_threads = false;
-    {
-        std::unique_lock<std::mutex> lock(_mtx);
+    std::unique_lock<std::mutex> lock(_mtx);
     
-        if (state == State::kStopped) return;
-        
-        state = State::kStopping;
-        have_waiting_threads = (counter_exist_threads > counter_busy_threads);
-    }
+    if (state == State::kStopped) return;
     
-    if (have_waiting_threads) {
+    state = State::kStopping;
+
+    if (counter_exist_threads > counter_busy_threads) {
         empty_condition.notify_all();
     }
-    
-    {
-        std::unique_lock<std::mutex> lock(_mtx);
 
-        if (await) {
-            while (counter_exist_threads > 0) {
-                can_stop_executor_condition.wait(lock);
-            } 
+    if (await) {
+        while (counter_exist_threads > 0) {
+            can_stop_executor_condition.wait(lock);
         }
-        state = State::kStopped;    
     }
 }
 
@@ -68,16 +59,12 @@ void Executor::perform(bool is_not_dying_thread) {
 
         // Waiting for a task
         bool timeout = false;
-        size_t remaining_time = _idle_time;
+        auto timeout_time = std::chrono::steady_clock::now() + std::chrono::milliseconds(_idle_time);
         while (state == State::kRun && tasks.empty()) {
-            auto begin = std::chrono::steady_clock::now();
-            auto wait_res = empty_condition.wait_until(lock, begin + std::chrono::milliseconds(remaining_time));
+            auto wait_res = empty_condition.wait_until(lock, timeout_time);
             if (wait_res == std::cv_status::timeout) {
                 timeout = true;
                 break;
-            } 
-            else {
-                remaining_time -= std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin).count();
             }
         }
 
@@ -118,12 +105,10 @@ void Executor::perform(bool is_not_dying_thread) {
     }
 
     --counter_exist_threads;
-    bool notify_await_stop = (counter_exist_threads == 0) && state == State::kStopping;
-    lock.unlock();
-
-    if (notify_await_stop) {
+    if (counter_exist_threads == 0 && state == State::kStopping) {
+        state = State::kStopped;
         can_stop_executor_condition.notify_all();
-    } 
+    }
 }
 } // namespace Concurrency
 } // namespace Afina
