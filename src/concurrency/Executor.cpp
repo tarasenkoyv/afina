@@ -20,7 +20,7 @@ Executor::Executor(std::size_t low_watermark, std::size_t high_watermark,
 void Executor::Start() {
     std::unique_lock<std::mutex> lock(_mtx);
     if (state == State::kRun) return;
-    
+
     //_logger = pLogging->select("network");
     //_logger->info("Start thread pull");
     counter_exist_threads = _low_watermark;
@@ -63,6 +63,7 @@ void Executor::Stop(bool await) {
 
 void Executor::perform(bool is_not_dying_thread) {
     std::unique_lock<std::mutex> lock(_mtx);
+    if (state == State::kInit) return;
     while (state == State::kRun) {
         std::function<void()> task;
 
