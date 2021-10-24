@@ -39,8 +39,12 @@ void Executor::Stop(bool await) {
     
     if (state == State::kStopped) return;
     
+    if (counter_exist_threads == 0) {
+        state = State::kStopped;
+        return;
+    }
+    
     state = State::kStopping;
-
     if (counter_exist_threads > counter_busy_threads) {
         empty_condition.notify_all();
     }
