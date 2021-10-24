@@ -20,6 +20,7 @@
 #include <afina/Storage.h>
 #include <afina/execute/Command.h>
 #include <afina/logging/Service.h>
+#include <afina/concurrency/Executor.h>
 
 #include "protocol/Parser.h"
 
@@ -104,6 +105,9 @@ void ServerImpl::Join() {
 
 // See Server.h
 void ServerImpl::OnRun() {
+    Afina::Concurrency::Executor thread_pool(3, _max_handlers, 10, 1000);
+    thread_pool.Start();
+    
     // Here is connection state
     // - parser: parse state of the stream
     // - command_to_execute: last command parsed out of stream
@@ -151,7 +155,9 @@ void ServerImpl::OnRun() {
 
             if (_sockets.size() <= _max_handlers) {
                 _sockets.insert(client_socket);
-                std::thread(&ServerImpl::OnHandleClientRequest, this, client_socket).detach();
+                if (!thread_pool.Execute(&ServerImpl::OnHandleClientRequest, this, client_socket)) {
+                    CloseSocket(client_socket);
+                }
             } 
             else {
                 close(client_socket);
@@ -164,6 +170,8 @@ void ServerImpl::OnRun() {
 
     // We've finished to accept new connections
     CloseSocket(_server_socket);
+
+    thread_pool.Stop(true);
 }
 
 // See Server.h
