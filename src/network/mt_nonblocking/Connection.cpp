@@ -132,11 +132,11 @@ void Connection::DoRead() {
     }
     catch(std::runtime_error &ex) {
         _logger->error("Failed to process connection on descriptor {}: {}", _socket, ex.what());
-        _is_alive = false;
+        _is_alive.store(false, std::memory_order::memory_order_relaxed);
     }
     catch(...) { 
         _logger->error("Failed to process connection on descriptor {}: {}", _socket, "unknown error");
-        _is_alive = false;
+        _is_alive.store(false, std::memory_order::memory_order_relaxed);
     }
 
     std::atomic_thread_fence(std::memory_order::memory_order_release);
@@ -164,7 +164,7 @@ void Connection::DoWrite() {
                 }
                 else {
                     _logger->error("Failed to write connection on descriptor {}", _socket);
-                    _is_alive = false;
+                    _is_alive.store(false, std::memory_order::memory_order_relaxed);
                     return;
                 }
             }
