@@ -17,7 +17,7 @@ void Connection::Start() {
     _logger = pLogging->select("network");
     _logger->debug("Connection started on descriptor {}", _socket);
 
-    _event.events = EPOLLIN | EPOLLERR | EPOLLHUP | EPOLLRDHUP;
+    _event.events = EPOLLET | EPOLLIN | EPOLLERR | EPOLLHUP | EPOLLRDHUP;
  }
 
 // See Connection.h
