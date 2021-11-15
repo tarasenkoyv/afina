@@ -27,20 +27,16 @@ namespace MTnonblock {
 class Connection {
 public:
     Connection(int s, std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Logging::Service> pl) : _socket(s),
-        pStorage(ps), pLogging(pl) {
-        std::unique_lock<std::mutex> lock(_mutex);
+        pStorage(ps), pLogging(pl), _head_offset(0), _arg_remains(0), _read_buffer_offset(0),
+        _is_eof(false) {
         std::memset(&_event, 0, sizeof(struct epoll_event));
         _event.data.ptr = this;
         _is_alive.store(true, std::memory_order::memory_order_relaxed);
-        _is_eof.store(false, std::memory_order::memory_order_release);
-        _head_offset = 0;
-        _arg_remains = 0;
         std::memset(_read_buffer, 0, MAXLEN);
-        _read_buffer_offset = 0;
     }
 
     inline bool isAlive() const { 
-        return _is_alive.load(std::memory_order_acquire);
+        return _is_alive.load(std::memory_order_relaxed);
      }
 
     void Start();
@@ -69,7 +65,7 @@ private:
     uint32_t _head_offset;
 
     std::atomic<bool> _is_alive;
-    std::atomic<bool> _is_eof;
+    bool _is_eof;
 
     // Here is connection state
     // - parser: parse state of the stream
@@ -85,8 +81,6 @@ private:
 
     // Logger instance
     std::shared_ptr<spdlog::logger> _logger;
-
-    std::mutex _mutex;
 };
 
 } // namespace MTnonblock

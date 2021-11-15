@@ -23,13 +23,13 @@ void Connection::Start() {
 // See Connection.h
 void Connection::OnError() { 
     _logger->error("Failed to process connection on descriptor {}", _socket);
-    _is_alive.store(false, std::memory_order::memory_order_release);
+    _is_alive.store(false, std::memory_order::memory_order_relaxed);
  }
 
 // See Connection.h
 void Connection::OnClose() { 
     _logger->debug("Close connection on descriptor {}", _socket);
-    _is_alive.store(false, std::memory_order::memory_order_release);
+    _is_alive.store(false, std::memory_order::memory_order_relaxed);
  }
 
 // See Connection.h
@@ -54,7 +54,7 @@ void Connection::DoRead() {
             /* End of file. The remote has closed the
             connection. */
             if (_event.events & EPOLLOUT) {
-                _is_eof.store(true, std::memory_order::memory_order_relaxed);
+                _is_eof = true;
             }
             else {
                 _is_alive.store(false, std::memory_order::memory_order_relaxed);
@@ -171,14 +171,14 @@ void Connection::DoWrite() {
         _head_offset = 0;
         _outgoing.pop_front();
 
-        if (!(_event.events & EPOLLIN) && _outgoing.size() < MAX_OUTGOING_QUEUE_SIZE) {
+        if (!(_event.events & EPOLLIN) && _outgoing.size() < 0.9 * MAX_OUTGOING_QUEUE_SIZE) {
             _event.events |= EPOLLIN;
         }
     }
 
     _event.events &= ~EPOLLOUT;
 
-    if (_is_eof.load(std::memory_order::memory_order_relaxed)) {
+    if (_is_eof) {
         _is_alive.store(false, std::memory_order::memory_order_relaxed);
     }
 
