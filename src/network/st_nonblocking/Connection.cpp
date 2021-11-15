@@ -168,7 +168,7 @@ void Connection::DoWrite() {
         _head_offset = 0;
         _outgoing.pop_front();
 
-        if (!(_event.events & EPOLLIN) && _outgoing.size() < MAX_OUTGOING_QUEUE_SIZE) {
+        if (!(_event.events & EPOLLIN) && _outgoing.size() < 0.9 * MAX_OUTGOING_QUEUE_SIZE) {
             _event.events |= EPOLLIN;
         }
     }
