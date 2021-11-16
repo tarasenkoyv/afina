@@ -100,18 +100,15 @@ public:
 
     ~Engine() {
         if (StackBottom != nullptr) {
-            delete[] std::get<0>(idle_ctx->Stack);
             delete idle_ctx;
         }
         while (alive != nullptr) {
             context* tmp = alive;
-            delete[] std::get<0>(alive->Stack);
             alive = alive->next;
             delete tmp;
         }
         while (blocked != nullptr) {
             context* tmp = blocked;
-            delete [] std::get<0>(blocked->Stack);
             blocked = blocked->next;
             delete tmp;
         }
@@ -134,7 +131,7 @@ public:
      * If routine to pass execution to is not specified (nullptr) then method should behaves like yield. In case
      * if passed routine is the current one method does nothing
      */
-    void sched(void *routine);
+    void sched(void *routine_);
 
     /**
      * Blocks current routine so that is can't be scheduled anymore
@@ -142,12 +139,12 @@ public:
      *
      * If argument is nullptr then block current coroutine
      */
-    void block(void *coro = nullptr);
+    void block(void *routine_ = nullptr);
 
     /**
      * Put coroutine back to list of alive, so that it could be scheduled later
      */
-    void unblock(void *coro);
+    void unblock(void *routine_);
 
     /**
      * Entry point into the engine. Prepare all internal mechanics and starts given function which is
@@ -184,7 +181,6 @@ public:
         }
 
         // Shutdown runtime
-        delete[] std::get<0>(idle_ctx->Stack);
         delete idle_ctx;
         this->StackBottom = nullptr;
     }
@@ -243,7 +239,6 @@ public:
             // current coroutine finished, and the pointer is not relevant now
             cur_routine = nullptr;
             pc->prev = pc->next = nullptr;
-            delete[] std::get<0>(pc->Stack);
             delete pc;
 
             // We cannot return here, as this function "returned" once already, so here we must select some other

@@ -24,6 +24,7 @@ void Engine::Store(context &ctx) {
         std::get<0>(ctx.Stack) = new char[stack_size];
         std::get<1>(ctx.Stack) = stack_size;
     }
+    
     std::memcpy(std::get<0>(ctx.Stack), ctx.Low, stack_size);
 }
 
