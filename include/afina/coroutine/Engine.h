@@ -228,20 +228,7 @@ public:
             // to pass control after that. We never want to go backward by stack as that would mean to go backward in
             // time. Function run() has already return once (when setjmp returns 0), so return second return from run
             // would looks a bit awkward
-            if (pc->prev != nullptr) {
-                pc->prev->next = pc->next;
-            }
-
-            if (pc->next != nullptr) {
-                pc->next->prev = pc->prev;
-            }
-
-            if (alive == cur_routine) {
-                alive = alive->next;
-            }
-            else if (blocked == cur_routine) {
-                blocked = blocked->next;
-            }
+            delete_from_list(alive, pc);
 
             // current coroutine finished, and the pointer is not relevant now
             cur_routine = nullptr;
