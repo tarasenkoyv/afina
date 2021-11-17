@@ -260,12 +260,7 @@ public:
         Store(*pc);
 
         // Add routine as alive double-linked list
-        pc->next = alive;
-        pc->prev = nullptr;
-        alive = pc;
-        if (pc->next != nullptr) {
-            pc->next->prev = pc;
-        }
+        add_to_list(alive, pc);
 
         return pc;
     }
