@@ -61,7 +61,7 @@ void Engine::sched(void *routine_) {
     }
 
     context* sched_cur = static_cast<context*>(routine_);
-    if (sched_cur == cur_routine) {
+    if (sched_cur == cur_routine || sched_cur->is_blocked) {
         return;
     }
     
@@ -108,12 +108,14 @@ void Engine::block(void *routine_) {
     if (routine_ == nullptr || cur_routine == routine_) {
         delete_from_list(alive, cur_routine);
         add_to_list(blocked, cur_routine);
-        sched(idle_ctx);
+        cur_routine->is_blocked = true;
+        yield();
     } 
     else {
         context* coro = static_cast<context*>(routine_);
         delete_from_list(alive, coro);
         add_to_list(blocked, coro);
+        coro->is_blocked = true;
     }
 }
 
@@ -124,6 +126,7 @@ void Engine::unblock(void *routine_) {
     context* coro = static_cast<context*>(routine_);
     delete_from_list(blocked, coro);
     add_to_list(alive, coro);
+    coro->is_blocked = false;
 }
 
 } // namespace Coroutine

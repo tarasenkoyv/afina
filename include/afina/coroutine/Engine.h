@@ -47,6 +47,8 @@ private:
         // To include routine in the different lists, such as "alive", "blocked", e.t.c
         struct context *prev = nullptr;
         struct context *next = nullptr;
+
+        bool is_blocked = false;
     } context;
 
     /**
