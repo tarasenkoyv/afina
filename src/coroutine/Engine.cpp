@@ -10,12 +10,12 @@ namespace Afina {
 namespace Coroutine {
 
 void Engine::Store(context &ctx) {
-    char stack_addr;
-    if (&stack_addr <= ctx.Low) {
-        ctx.Low = &stack_addr;
+    volatile char stack_addr;
+    if (_stack_direction) {
+        ctx.Low = const_cast<char*>(&stack_addr);
     } 
     else {
-        ctx.Hight = &stack_addr;
+        ctx.Hight = const_cast<char*>(&stack_addr);
     }
 
     std::size_t stack_size = ctx.Hight - ctx.Low;
@@ -29,8 +29,9 @@ void Engine::Store(context &ctx) {
 }
 
 void Engine::Restore(context &ctx) {
-    char stack_addr;
-    if (&stack_addr >= ctx.Low && &stack_addr <= ctx.Hight) {
+    volatile char stack_addr;
+    bool call_restore = _stack_direction ? (&stack_addr >= ctx.Low) : (&stack_addr <= ctx.Hight);
+    if (call_restore) {
         Restore(ctx);
     }
     std::memcpy(ctx.Low, std::get<0>(ctx.Stack), ctx.Hight - ctx.Low);
@@ -87,7 +88,6 @@ void Engine::delete_from_list(context*& list, context*& routine_) {
     if (routine_->prev != nullptr) {
         routine_->prev->next = routine_->next;
     }
-
 }
 
 void Engine::add_to_list(context*& list, context*& routine_) {
@@ -95,7 +95,8 @@ void Engine::add_to_list(context*& list, context*& routine_) {
         list = routine_;
         list->next = nullptr;
         list->prev = nullptr;
-    } else {
+    } 
+    else {
         routine_->next = list;
         routine_->prev = nullptr;
         list->prev = routine_;
@@ -108,7 +109,8 @@ void Engine::block(void *routine_) {
         delete_from_list(alive, cur_routine);
         add_to_list(blocked, cur_routine);
         sched(idle_ctx);
-    } else {
+    } 
+    else {
         context* coro = static_cast<context*>(routine_);
         delete_from_list(alive, coro);
         add_to_list(blocked, coro);

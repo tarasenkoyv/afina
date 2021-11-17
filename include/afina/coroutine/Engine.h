@@ -21,6 +21,7 @@ public:
     using unblocker_func = std::function<void(Engine &)>;
 
 private:
+    bool _stack_direction;
     /**
      * A single coroutine instance which could be scheduled for execution
      * should be allocated on heap
@@ -93,8 +94,12 @@ protected:
 
 public:
     Engine(unblocker_func unblocker = null_unblocker)
-        : StackBottom(0), cur_routine(nullptr), alive(nullptr), _unblocker(unblocker), blocked(nullptr),
-          idle_ctx(nullptr) {}
+        : StackBottom(nullptr), cur_routine(nullptr), alive(nullptr), _unblocker(unblocker), blocked(nullptr),
+          idle_ctx(nullptr) { 
+              volatile char outer_var_addr;
+              set_stack_direction(outer_var_addr);
+          }
+
     Engine(Engine &&) = delete;
     Engine(const Engine &) = delete;
 
@@ -158,8 +163,8 @@ public:
      */
     template <typename... Ta> void start(void (*main)(Ta...), Ta &&... args) {
         // To acquire stack begin, create variable on stack and remember its address
-        char StackStartsHere;
-        this->StackBottom = &StackStartsHere;
+        volatile char StackStartsHere;
+        this->StackBottom = const_cast<char*>(&StackStartsHere);
 
         // Start routine execution
         void *pc = run(main, std::forward<Ta>(args)...);
@@ -187,8 +192,8 @@ public:
 
     template <typename... Ta> 
     void *run(void (*func)(Ta...), Ta &&... args) {
-        char stack_addr;
-        return run_impl(&stack_addr, func, std::forward<Ta>(args)...);
+        volatile char stack_addr;
+        return run_impl(const_cast<char*>(&stack_addr), func, std::forward<Ta>(args)...);
     }
 
     /**
@@ -267,6 +272,11 @@ private:
     void delete_from_list(context*& list, context*& routine_);
 
     void add_to_list(context*& list, context*& routine_);
+
+    void volatile set_stack_direction(volatile char &outer_var_addr) {
+        volatile char inner_var_addr;
+        _stack_direction = (&outer_var_addr - &inner_var_addr > 0);
+    }
 };
 
 } // namespace Coroutine
