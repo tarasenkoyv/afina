@@ -109,7 +109,7 @@ void Engine::block(void *routine_) {
         delete_from_list(alive, cur_routine);
         add_to_list(blocked, cur_routine);
         cur_routine->is_blocked = true;
-        yield();
+        sched(idle_ctx);
     } 
     else {
         context* coro = static_cast<context*>(routine_);
