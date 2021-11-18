@@ -1,10 +1,14 @@
 #ifndef AFINA_NETWORK_MT_NONBLOCKING_SERVER_H
 #define AFINA_NETWORK_MT_NONBLOCKING_SERVER_H
 
+#include <mutex>
 #include <thread>
 #include <vector>
+#include <set>
 
 #include <afina/network/Server.h>
+
+#include "Connection.h"
 
 namespace spdlog {
 class logger;
@@ -40,6 +44,10 @@ protected:
     void OnNewConnection();
 
 private:
+    void CloseConnection(Connection *pc);
+    
+private:
+    friend class Worker;
     // logger to use
     std::shared_ptr<spdlog::logger> _logger;
 
@@ -63,6 +71,9 @@ private:
 
     // threads serving read/write requests
     std::vector<Worker> _workers;
+
+    std::set<Connection*> _connections;
+    std::mutex _mutex;
 };
 
 } // namespace MTnonblock
