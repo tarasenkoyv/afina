@@ -21,12 +21,17 @@ public:
     using unblocker_func = std::function<void(Engine &)>;
 
 private:
+    bool _stack_direction;
     /**
      * A single coroutine instance which could be scheduled for execution
      * should be allocated on heap
      */
     struct context;
     typedef struct context {
+        ~context() {
+            delete[] std::get<0>(Stack);
+        }
+
         // coroutine stack start address
         char *Low = nullptr;
 
@@ -42,6 +47,8 @@ private:
         // To include routine in the different lists, such as "alive", "blocked", e.t.c
         struct context *prev = nullptr;
         struct context *next = nullptr;
+
+        bool is_blocked = false;
     } context;
 
     /**
@@ -89,9 +96,30 @@ protected:
 
 public:
     Engine(unblocker_func unblocker = null_unblocker)
-        : StackBottom(0), cur_routine(nullptr), alive(nullptr), _unblocker(unblocker) {}
+        : StackBottom(nullptr), cur_routine(nullptr), alive(nullptr), _unblocker(unblocker), blocked(nullptr),
+          idle_ctx(nullptr) { 
+              volatile char outer_var_addr;
+              set_stack_direction(outer_var_addr);
+          }
+
     Engine(Engine &&) = delete;
     Engine(const Engine &) = delete;
+
+    ~Engine() {
+        if (StackBottom != nullptr) {
+            delete idle_ctx;
+        }
+        while (alive != nullptr) {
+            context* tmp = alive;
+            alive = alive->next;
+            delete tmp;
+        }
+        while (blocked != nullptr) {
+            context* tmp = blocked;
+            blocked = blocked->next;
+            delete tmp;
+        }
+    }
 
     /**
      * Gives up current routine execution and let engine to schedule other one. It is not defined when
@@ -110,7 +138,7 @@ public:
      * If routine to pass execution to is not specified (nullptr) then method should behaves like yield. In case
      * if passed routine is the current one method does nothing
      */
-    void sched(void *routine);
+    void sched(void *routine_);
 
     /**
      * Blocks current routine so that is can't be scheduled anymore
@@ -118,12 +146,12 @@ public:
      *
      * If argument is nullptr then block current coroutine
      */
-    void block(void *coro = nullptr);
+    void block(void *routine_ = nullptr);
 
     /**
      * Put coroutine back to list of alive, so that it could be scheduled later
      */
-    void unblock(void *coro);
+    void unblock(void *routine_);
 
     /**
      * Entry point into the engine. Prepare all internal mechanics and starts given function which is
@@ -137,42 +165,54 @@ public:
      */
     template <typename... Ta> void start(void (*main)(Ta...), Ta &&... args) {
         // To acquire stack begin, create variable on stack and remember its address
-        char StackStartsHere;
-        this->StackBottom = &StackStartsHere;
+        volatile char StackStartsHere;
+        this->StackBottom = const_cast<char*>(&StackStartsHere);
 
         // Start routine execution
         void *pc = run(main, std::forward<Ta>(args)...);
 
         idle_ctx = new context();
+        idle_ctx->Low = StackBottom;
+        idle_ctx->Hight = StackBottom;
         if (setjmp(idle_ctx->Environment) > 0) {
-            if (alive == nullptr) {
+            if (alive == nullptr && blocked != nullptr) {
                 _unblocker(*this);
             }
-
+            cur_routine = idle_ctx;
             // Here: correct finish of the coroutine section
             yield();
         } else if (pc != nullptr) {
             Store(*idle_ctx);
+            cur_routine = idle_ctx;
             sched(pc);
         }
 
         // Shutdown runtime
         delete idle_ctx;
-        this->StackBottom = 0;
+        this->StackBottom = nullptr;
+    }
+
+    template <typename... Ta> 
+    void *run(void (*func)(Ta...), Ta &&... args) {
+        volatile char stack_addr;
+        return run_impl(const_cast<char*>(&stack_addr), func, std::forward<Ta>(args)...);
     }
 
     /**
      * Register new coroutine. It won't receive control until scheduled explicitely or implicitly. In case of some
      * errors function returns -1
      */
-    template <typename... Ta> void *run(void (*func)(Ta...), Ta &&... args) {
-        if (this->StackBottom == 0) {
+    template <typename... Ta> 
+    void *run_impl(char *stack_addr, void (*func)(Ta...), Ta &&... args) {
+        if (this->StackBottom == nullptr) {
             // Engine wasn't initialized yet
             return nullptr;
         }
 
         // New coroutine context that carries around all information enough to call function
         context *pc = new context();
+        pc->Low = stack_addr;
+        pc->Hight = stack_addr;
 
         // Store current state right here, i.e just before enter new coroutine, later, once it gets scheduled
         // execution starts here. Note that we have to acquire stack of the current function call to ensure
@@ -188,22 +228,11 @@ public:
             // to pass control after that. We never want to go backward by stack as that would mean to go backward in
             // time. Function run() has already return once (when setjmp returns 0), so return second return from run
             // would looks a bit awkward
-            if (pc->prev != nullptr) {
-                pc->prev->next = pc->next;
-            }
-
-            if (pc->next != nullptr) {
-                pc->next->prev = pc->prev;
-            }
-
-            if (alive == cur_routine) {
-                alive = alive->next;
-            }
+            delete_from_list(alive, pc);
 
             // current coroutine finished, and the pointer is not relevant now
             cur_routine = nullptr;
             pc->prev = pc->next = nullptr;
-            delete std::get<0>(pc->Stack);
             delete pc;
 
             // We cannot return here, as this function "returned" once already, so here we must select some other
@@ -218,13 +247,19 @@ public:
         Store(*pc);
 
         // Add routine as alive double-linked list
-        pc->next = alive;
-        alive = pc;
-        if (pc->next != nullptr) {
-            pc->next->prev = pc;
-        }
+        add_to_list(alive, pc);
 
         return pc;
+    }
+
+private:
+    void delete_from_list(context*& list, context*& routine_);
+
+    void add_to_list(context*& list, context*& routine_);
+
+    void volatile set_stack_direction(volatile char &outer_var_addr) {
+        volatile char inner_var_addr;
+        _stack_direction = (&outer_var_addr - &inner_var_addr > 0);
     }
 };
 

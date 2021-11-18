@@ -87,7 +87,7 @@ MESSAGE( STATUS "VERSION_DIRTY: " ${AFINA_VERSION_DIRTY} )
 ##############################################################################
 # Sources
 ##############################################################################
-include(ECMEnableSanitizers)
+#include(ECMEnableSanitizers)
 
 ## Build services
 add_subdirectory(src)
